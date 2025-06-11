@@ -2,7 +2,7 @@ from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 import mysql.connector
 from mysql.connector import Error
-import openai
+from openai import OpenAI
 import json
 from datetime import datetime
 import uuid
@@ -10,8 +10,8 @@ import uuid
 app = Flask(__name__)
 CORS(app)
 
-# OpenAI API配置
-openai.api_key = "你的OpenAI_API_KEY"  # 请替换为你的实际API密钥
+# DeepSeek API配置
+client = OpenAI(api_key="你的DeepSeek_API_KEY", base_url="https://api.deepseek.com")
 
 # MySQL数据库配置
 DB_CONFIG = {
@@ -103,12 +103,11 @@ def chat():
                 "content": msg['content']
             })
         
-        # 调用OpenAI API
-        response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
+        # 调用DeepSeek API
+        response = client.chat.completions.create(
+            model="deepseek-chat",
             messages=messages,
-            max_tokens=1000,
-            temperature=0.7
+            stream=False
         )
         
         ai_response = response.choices[0].message.content
