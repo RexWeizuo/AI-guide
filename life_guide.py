@@ -1,18 +1,26 @@
 from openai import OpenAI
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+from datetime import datetime
+import mysql.connector
 
+app = Flask(__name__)
+CORS(app)
 client = OpenAI(api_key="sk-1530b5812e634ccc873117cdb636b7c6", base_url="https://api.deepseek.com")
 
-import sqlite3
-from datetime import datetime
-
 # 初始化数据库连接
-conn = sqlite3.connect('chat_history.db')
-c = conn.cursor()
+conn = mysql.connector.connect(
+  host="localhost",
+  user="root",
+  password="twz990304",
+  database="chat_history"
+)
 
-# 创建消息表
+# 创建消息表（MySQL语法）
+c = conn.cursor()
 c.execute('''CREATE TABLE IF NOT EXISTS messages
-             (id INTEGER PRIMARY KEY AUTOINCREMENT,
-              role TEXT,
+             (id INT AUTO_INCREMENT PRIMARY KEY,
+              role VARCHAR(255),
               content TEXT,
               timestamp DATETIME)''')
 conn.commit()
@@ -61,38 +69,81 @@ COACH_PROMPT = '''
 }}
 '''
 
+def call_deepseek_api(context):
+    try:
+        response = client.chat.completions.create(
+            model="deepseek-chat",
+            messages=context,
+            temperature=0.3,
+            max_tokens=2000
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        print(f"API调用失败: {str(e)}")
+        return ""
+
 # 初始化时获取用户状态
 current_status = input("当前状态描述（例：工作倦怠/学习瓶颈）：")
 user_vision = input("长期愿景（例：3年成为AI专家）：")
 
-messages = [
-    {"role": "system", "content": COACH_PROMPT.format(
-        current_status=current_status,
-        user_vision=user_vision
-    )}
-]
-
-while True:
-    user_input = input("用户：")
+@app.route('/chat', methods=['POST'])
+def chat_handler():
+    data = request.json
+    user_input = data.get('message')
+    user_id = data.get('user_id')
+    c.execute("SELECT role, content FROM messages ORDER BY id DESC LIMIT 5")
+    history = [{'role': row[0], 'content': row[1]} for row in reversed(c.fetchall())]
+    
+    # 构建带上下文的对话系统
+    messages = [
+        {"role": "system", "content": COACH_PROMPT.format(
+            current_status=current_status,
+            user_vision=user_vision
+        )}
+    ] + (history if len(history) > 0 else [])
     
     # 保存用户消息
-    c.execute("INSERT INTO messages (role, content, timestamp) VALUES (?,?,?)",
+    c.execute("INSERT INTO messages (role, content, timestamp) VALUES (%s, %s, %s)",
+              ("user", user_input, datetime.now()))
+    conn.commit()
+
+    # 构建上下文
+    current_context = [{"role": "system", "content": COACH_PROMPT}] + load_history()
+    current_context.append({"role": "user", "content": user_input})
+
+    # 获取AI回复
+    assistant_reply = call_deepseek_api(current_context)
+
+    # 保存回复
+    if assistant_reply:
+        c.execute("INSERT INTO messages (role, content, timestamp) VALUES (%s, %s, %s)",
+                  ("assistant", assistant_reply, datetime.now()))
+        conn.commit()
+
+    return jsonify({"reply": assistant_reply})
+
+
+def load_history():
+    c.execute("SELECT role, content FROM messages ORDER BY id DESC LIMIT 5")
+    return [{'role': row[0], 'content': row[1]} for row in reversed(c.fetchall())]
+
+if __name__ == '__main__':
+    app.run(port=5000)
+    c.execute("INSERT INTO messages (role, content, timestamp) VALUES (%s, %s, %s)",
               ("user", user_input, datetime.now()))
     conn.commit()
     
-    # 获取助手回复
-    messages.append({"role": "user", "content": user_input})
-    response = client.chat.completions.create(
-        model="deepseek-reasoner",
-        messages=messages[-6:],  # 保留最近5轮+当前
-        stream=False
-    )
+    # 添加实时交互上下文
+    current_context = messages + [{"role": "user", "content": user_input}]
     
-    # 保存助手回复
-    assistant_reply = response.choices[0].message.content
-    c.execute("INSERT INTO messages (role, content, timestamp) VALUES (?,?,?)",
-              ("assistant", assistant_reply, datetime.now()))
-    conn.commit()
+    # 调用API获取回复
+    assistant_reply = call_deepseek_api(current_context)
+    
+    # 智能保存助手回复
+    if len(assistant_reply.strip()) > 0:
+        c.execute("INSERT INTO messages (role, content, timestamp) VALUES (%s, %s, %s)",
+                  ("assistant", assistant_reply, datetime.now()))
+        conn.commit()
     
     print(f"助手：{assistant_reply}")
     messages.append({"role": "assistant", "content": assistant_reply})
