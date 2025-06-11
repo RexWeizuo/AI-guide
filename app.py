@@ -11,18 +11,18 @@ app = Flask(__name__)
 CORS(app)
 
 # DeepSeek API配置
-client = OpenAI(api_key="你的DeepSeek_API_KEY", base_url="https://api.deepseek.com")
+client = OpenAI(api_key="sk-1530b5812e634ccc873117cdb636b7c6", base_url="https://api.deepseek.com")
 
 # MySQL数据库配置
 DB_CONFIG = {
     'host': 'localhost',
     'database': 'chatbot_db',
     'user': 'root',
-    'password': 'your_password'  # 请替换为你的MySQL密码
+    'password': 'twz990304'  # 请替换为你的MySQL密码
 }
 
 def init_database():
-    """初始化数据库和表"""
+    connection = None
     try:
         connection = mysql.connector.connect(**DB_CONFIG)
         cursor = connection.cursor()
@@ -60,7 +60,7 @@ def init_database():
     except Error as e:
         print(f"数据库初始化错误: {e}")
     finally:
-        if connection.is_connected():
+        if connection and connection.is_connected():
             cursor.close()
             connection.close()
 
